@@ -2499,6 +2499,33 @@ options:
   services:
   - rgw
   with_legacy: true
+- name: rgw_max_obj_version
+  type: uint
+  level: basic
+  desc: Approximate maximum number of versions per object
+  long_desc: Enforce approx cap on number of versions per object key in
+    versioning enabled buckets. Act as lower bound, since concurrent writes,
+    older versioned objects may not be tracked correctly and hence undercounted.
+    Enable this once every OSD is upgraded. Null versions, object-lock enabled
+    buckets are not tracked. To keep the newest N versions, use a lifecycle rule
+    with NoncurrentVersionExpiration and NewerNoncurrentVersions. Disable with
+    value 0
+  default: 0
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_max_obj_version_exempt_system_requests
+  type: bool
+  level: advanced
+  desc: Let system requests exceed rgw_max_obj_version
+  long_desc: If true, requests from system users (multisite sync and internal
+    tooling) bypass the rgw_max_obj_version cap, allowing secondary zones to
+    exceed the limit. If false, multisite replication may fail to copy all
+    object versions to the target cluster.
+  default: true
+  services:
+  - rgw
+  with_legacy: true
 - name: rgw_expose_bucket
   type: bool
   level: advanced
