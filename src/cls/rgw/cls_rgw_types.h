@@ -591,10 +591,16 @@ struct rgw_bucket_olh_entry {
   bool exists;
   bool pending_removal;
 
-  rgw_bucket_olh_entry() : delete_marker(false), epoch(0), exists(false), pending_removal(false) {}
+  // counter tracking the number of versions of this object. does not count
+  // null versions (bucket converted to versioned, or versioning suspended),
+  // and does not account for versions that existed before this counter
+  uint64_t obj_ver_counter;
+
+  rgw_bucket_olh_entry() : delete_marker(false), epoch(0), exists(false), pending_removal(false),
+                           obj_ver_counter(0) {}
 
   void encode(ceph::buffer::list &bl) const {
-    ENCODE_START(1, 1, bl);
+    ENCODE_START(2, 1, bl);
     encode(key, bl);
     encode(delete_marker, bl);
     encode(epoch, bl);
@@ -602,10 +608,11 @@ struct rgw_bucket_olh_entry {
     encode(tag, bl);
     encode(exists, bl);
     encode(pending_removal, bl);
+    encode(obj_ver_counter, bl);
     ENCODE_FINISH(bl);
   }
   void decode(ceph::buffer::list::const_iterator &bl) {
-    DECODE_START(1, bl);
+    DECODE_START(2, bl);
     decode(key, bl);
     decode(delete_marker, bl);
     decode(epoch, bl);
@@ -613,6 +620,9 @@ struct rgw_bucket_olh_entry {
     decode(tag, bl);
     decode(exists, bl);
     decode(pending_removal, bl);
+    if (struct_v >= 2) {
+      decode(obj_ver_counter, bl);
+    }
     DECODE_FINISH(bl);
   }
   void dump(ceph::Formatter *f) const;

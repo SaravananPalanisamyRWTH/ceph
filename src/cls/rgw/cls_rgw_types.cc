@@ -488,6 +488,7 @@ void rgw_bucket_olh_entry::dump(Formatter *f) const
   encode_json("tag", tag, f);
   encode_json("exists", exists, f);
   encode_json("pending_removal", pending_removal, f);
+  encode_json("obj_ver_counter", obj_ver_counter, f);
 }
 
 void rgw_bucket_olh_entry::decode_json(JSONObj *obj)
@@ -499,6 +500,7 @@ void rgw_bucket_olh_entry::decode_json(JSONObj *obj)
   JSONDecoder::decode_json("tag", tag, obj);
   JSONDecoder::decode_json("exists", exists, obj);
   JSONDecoder::decode_json("pending_removal", pending_removal, obj);
+  JSONDecoder::decode_json("obj_ver_counter", obj_ver_counter, obj);
 }
 
 list<rgw_bucket_olh_entry> rgw_bucket_olh_entry::generate_test_instances()
@@ -512,6 +514,7 @@ list<rgw_bucket_olh_entry> rgw_bucket_olh_entry::generate_test_instances()
   entry.key.instance = "key.instance";
   entry.exists = true;
   entry.pending_removal = true;
+  entry.obj_ver_counter = 7;
   o.push_back(std::move(entry));
   o.emplace_back();
   return o;

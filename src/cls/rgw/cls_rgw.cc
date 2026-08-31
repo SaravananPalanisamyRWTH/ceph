@@ -1688,6 +1688,16 @@ public:
     return 0;
   }
 
+  void increment_ver_counter() {
+    olh_data_entry.obj_ver_counter++;
+  }
+
+  void decrement_ver_counter() {
+    if (olh_data_entry.obj_ver_counter > 0) {
+      olh_data_entry.obj_ver_counter--;
+    }
+  }
+
   void update_log(OLHLogOp op, const string& op_tag, cls_rgw_obj_key& key, bool delete_marker, uint64_t epoch = 0) {
     if (epoch == 0) {
       epoch = olh_data_entry.epoch;
@@ -1921,6 +1931,12 @@ static int rgw_bucket_link_olh(cls_method_context_t hctx, bufferlist *in, buffer
     obj.init_as_delete_marker(op.meta);
   }
 
+  /* versioned_epoch stays zero until an instance is linked, so zero here means
+   * this op adds a version rather than relinking one. must be read before
+   * obj.write() below, which sets it. null versions are not counted. */
+  const bool creates_version = !op.key.instance.empty() &&
+      obj.get_dir_entry().versioned_epoch == 0;
+
   const uint64_t prev_epoch = olh.get_epoch();
 
   // op.olh_epoch is provided (> 0) in the case when a remote epoch is coming in as the result of multisite sync;
@@ -1982,6 +1998,10 @@ static int rgw_bucket_link_olh(cls_method_context_t hctx, bufferlist *in, buffer
       olh.update_log(CLS_RGW_OLH_OP_REMOVE_INSTANCE, op.op_tag, op.key, false, now_epoch);
     }
 
+    if (creates_version) {
+      olh.increment_ver_counter();
+    }
+
     if (promote) {
       olh.update(op.key, op.delete_marker);
     }
@@ -2008,6 +2028,12 @@ static int rgw_bucket_link_olh(cls_method_context_t hctx, bufferlist *in, buffer
     } else {
       olh.update_log(CLS_RGW_OLH_OP_STALE, op.op_tag, op.key, false, now_epoch);
     }
+
+    /* the instance was still written, so it counts towards the limit */
+    if (creates_version) {
+      olh.increment_ver_counter();
+    }
+
     ret = olh.write(header);
   }
 
@@ -2159,6 +2185,10 @@ static int rgw_bucket_unlink_instance(cls_method_context_t hctx, bufferlist *in,
     return ret;
   }
 
+  /* checks whether this is versioned instance and linked */
+  const bool was_counted = !dest_key.instance.empty() &&
+      obj.get_dir_entry().versioned_epoch != 0;
+
   bool olh_found;
   ret = olh.init(&olh_found);
   if (ret < 0) {
@@ -2273,6 +2303,10 @@ static int rgw_bucket_unlink_instance(cls_method_context_t hctx, bufferlist *in,
     }
 
     olh.update_log(CLS_RGW_OLH_OP_REMOVE_INSTANCE, op.op_tag, op.key, false, now_epoch);
+  }
+
+  if (was_counted) {
+    olh.decrement_ver_counter();
   }
 
   ret = olh.write(header);
