@@ -667,6 +667,10 @@ class RadosObject : public StoreObject {
     virtual int get_torrent_info(const DoutPrefixProvider* dpp,
                                  optional_yield y, bufferlist& bl) override;
 
+    virtual int get_approx_version_count(const DoutPrefixProvider* dpp,
+                                         optional_yield y,
+                                         uint64_t* count) override;
+
     /* OMAP */
     virtual int omap_get_vals_by_keys(const DoutPrefixProvider *dpp, const std::string& oid,
 			      const std::set<std::string>& keys,

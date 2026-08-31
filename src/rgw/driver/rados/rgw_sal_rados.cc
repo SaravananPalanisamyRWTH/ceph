@@ -3009,6 +3009,21 @@ void RadosObject::get_raw_obj(rgw_raw_obj* raw_obj)
   store->getRados()->obj_to_raw((bucket->get_info()).placement_rule, get_obj(), raw_obj);
 }
 
+int RadosObject::get_approx_version_count(const DoutPrefixProvider* dpp,
+                                          optional_yield y, uint64_t* count)
+{
+  // the counter is maintained by cls_rgw in the bucket index olh entry
+  rgw_bucket_olh_entry olh_entry;
+  int ret = store->getRados()->bi_get_olh(dpp, bucket->get_info(), get_obj(),
+                                          &olh_entry, y);
+  if (ret < 0) {
+    return ret;
+  }
+
+  *count = olh_entry.obj_ver_counter;
+  return 0;
+}
+
 int RadosObject::get_torrent_info(const DoutPrefixProvider* dpp,
                                   optional_yield y, bufferlist& bl)
 {

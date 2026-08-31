@@ -222,6 +222,13 @@ protected:
   RGWQuota quota;
   int op_ret;
   int do_aws4_auth_completion();
+  // true if the write must be rejected for exceeding rgw_max_obj_version.
+  // ops that write to an object other than s->object must pass it explicitly
+  bool check_object_version_limit(rgw::sal::Bucket* bucket,
+                                  rgw::sal::Object* obj, optional_yield y);
+  bool check_object_version_limit(optional_yield y) {
+    return check_object_version_limit(s->bucket.get(), s->object.get(), y);
+  }
   bool init_called = false;
 
   virtual int init_quota();

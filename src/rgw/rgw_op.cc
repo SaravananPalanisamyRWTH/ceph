@@ -1954,6 +1954,69 @@ static void get_cors_response_headers(const DoutPrefixProvider *dpp, RGWCORSRule
 }
 
 /**
+ * Check whether the object already holds rgw_max_obj_version versions.
+ * Returns true when the caller must abort the op; op_ret carries the error.
+ */
+bool RGWOp::check_object_version_limit(rgw::sal::Bucket* bucket,
+                                       rgw::sal::Object* obj, optional_yield y)
+{
+  const uint64_t max_ver = s->cct->_conf->rgw_max_obj_version;
+  if (max_ver == 0) { /* limit disabled */
+    return false;
+  }
+
+  /* on multisite request, when exemption is enabled, allow the write */
+  if (s->system_request &&
+      s->cct->_conf->rgw_max_obj_version_exempt_system_requests) {
+    return false;
+  }
+
+  if (rgw::sal::Bucket::empty(bucket) || rgw::sal::Object::empty(obj)) {
+    return false;
+  }
+
+  if (!bucket->versioning_enabled()) {
+    return false;
+  }
+
+  // object lock requires that old versions are retained
+  if (bucket->get_info().obj_lock_enabled()) {
+    return false;
+  }
+
+  uint64_t ver_count = 0;
+  int r = obj->get_approx_version_count(this, y, &ver_count);
+  if (r == -ENOENT) { /* no versions yet */
+    return false;
+  }
+  if (r == -ENOTSUP) {
+    ldpp_dout(this, 10) << "rgw_max_obj_version is set but this driver cannot "
+                           "count object versions; not enforcing" << dendl;
+    return false;
+  }
+  if (r < 0) {
+    ldpp_dout(this, 5) << "WARNING: get_approx_version_count() ret=" << r
+                       << ", not enforcing rgw_max_obj_version" << dendl;
+    return false;
+  }
+
+  ldpp_dout(this, 20) << "check_object_version_limit: key=" << obj->get_name()
+                      << " ver_count=" << ver_count
+                      << " max_ver=" << max_ver << dendl;
+
+  if (ver_count >= max_ver) {
+    ldpp_dout(this, 5) << "object version count exceeded the maximum limit of "
+                       << max_ver << dendl;
+    s->err.message = "Object version count exceeds the maximum allowed limit of "
+                     + std::to_string(max_ver);
+    op_ret = -ERR_OBJ_VER_LIMIT_EXCEEDED;
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Generate the CORS header response
  *
  * This is described in the CORS standard, section 6.2.
@@ -4858,6 +4921,9 @@ void RGWPutObj::execute(optional_yield y)
 					 &cur_accounted_size);
   } else {
     if (s->bucket->versioning_enabled()) {
+      if (check_object_version_limit(y)) {
+        return;
+      }
       if (!version_id.empty()) {
         s->object->set_instance(version_id);
       } else {
@@ -5336,6 +5402,9 @@ void RGWPostObj::execute(optional_yield y)
     std::unique_ptr<rgw::sal::Object> obj =
 		     s->bucket->get_object(rgw_obj_key(get_current_filename()));
     if (s->bucket->versioning_enabled()) {
+      if (check_object_version_limit(s->bucket.get(), obj.get(), y)) {
+        return;
+      }
       obj->gen_rand_obj_instance_name();
     }
 
@@ -5938,6 +6007,13 @@ void RGWDeleteObj::execute(optional_yield y)
 
       // ignore return value from get_obj_attrs in all other cases
       op_ret = 0;
+
+      /* a delete without an instance creates a delete marker, which is
+       * itself a new version */
+      if (!s->object->have_instance() && check_object_version_limit(y)) {
+        return;
+      }
+
       if (check_obj_lock) {
         ceph_assert(state_loaded == 0);
         int object_lock_response = verify_object_lock(this, s->object->get_attrs(), bypass_perm, bypass_governance_mode);
@@ -6490,6 +6566,14 @@ void RGWCopyObj::execute(optional_yield y)
   // expose replacement tags to the notification event payload
   if (obj_tags) {
     s->tagset = *obj_tags;
+  }
+
+  // a remote destination zonegroup creates the version itself and applies its
+  // own limit there; only check when we create it locally
+  const bool remote_dest =
+      !s->penv.site->get_zonegroup().equals(s->bucket->get_info().zonegroup);
+  if (!remote_dest && check_object_version_limit(y)) {
+    return;
   }
 
   // make reservation for notification if needed
@@ -7381,6 +7465,10 @@ void RGWInitMultipart::execute(optional_yield y)
   if (rgw::sal::Object::empty(s->object.get()))
     return;
 
+  if (check_object_version_limit(y)) {
+    return;
+  }
+
   if (multipart_trace) {
     tracing::encode(multipart_trace->GetContext(), tracebl);
     attrs[RGW_ATTR_TRACE] = tracebl;
@@ -7675,6 +7763,12 @@ void RGWCompleteMultipart::execute(optional_yield y)
     ldpp_dout(this, 0) << "failed to acquire lock" << dendl;
     op_ret = -ERR_INTERNAL_ERROR;
     s->err.message = "This multipart completion is already in progress";
+    return;
+  }
+
+  /* the version is created here, not at init, so recheck. must stay after the
+   * try_lock above, whose -ENOENT path handles idempotent re-completion. */
+  if (s->bucket->versioning_enabled() && check_object_version_limit(y)) {
     return;
   }
 
@@ -8825,6 +8919,9 @@ int RGWBulkUploadOp::handle_file(const std::string_view path,
   }
 
   if (bucket->versioning_enabled()) {
+    if (check_object_version_limit(bucket.get(), obj.get(), y)) {
+      return op_ret;
+    }
     obj->gen_rand_obj_instance_name();
   }
 

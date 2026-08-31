@@ -1435,6 +1435,13 @@ class Object {
     virtual int get_torrent_info(const DoutPrefixProvider* dpp,
                                  optional_yield y, bufferlist& bl) = 0;
 
+    /// Approximate version count, for enforcing rgw_max_obj_version. -ENOENT
+    /// if the object has no versions, -ENOTSUP if the driver cannot count them.
+    virtual int get_approx_version_count(const DoutPrefixProvider* dpp,
+                                         optional_yield y, uint64_t* count) {
+      return -ENOTSUP;
+    }
+
     /** Get the version tracker for this object */
     virtual RGWObjVersionTracker& get_version_tracker() = 0;
 

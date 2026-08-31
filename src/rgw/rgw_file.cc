@@ -1883,6 +1883,10 @@ namespace rgw {
     aio.emplace(state->cct->_conf->rgw_put_obj_min_window_size);
 
     if (state->bucket->versioning_enabled()) {
+      if (check_object_version_limit(state->bucket.get(),
+                                     state->object.get(), state->yield)) {
+        goto done;
+      }
       if (!version_id.empty()) {
         state->object->set_instance(version_id);
       } else {
